@@ -13,6 +13,21 @@ type Measurement struct {
 	Temp float64
 }
 
+type AggregateData struct {
+	Min   float64
+	Max   float64
+	Sum   float64
+	Count int
+}
+
+type CityStats struct {
+	City  string
+	Min   float64
+	Max   float64
+	Mean  float64
+	Count int
+}
+
 func readlines(filename string) <-chan string {
 	out := make(chan string)
 
@@ -65,22 +80,73 @@ func parse(input <-chan string) <-chan Measurement {
 
 	return out
 }
+
+func filterAbove30(input <-chan Measurement) <-chan Measurement {
+	out := make(chan Measurement)
+
+	go func() {
+		defer close(out)
+
+		for m := range input {
+			if m.Temp > 30 {
+				out <- m
+			}
+		}
+	}()
+	return out
+}
+
+func aggregate(input <-chan Measurement) <-chan CityStats {
+	out := make(chan CityStats)
+	go func() {
+		defer close(out)
+		stats := make(map[string]*AggregateData)
+
+		for m := range input {
+			data, exist := stats[m.City]
+
+			if !exist {
+				stats[m.City] = &AggregateData{
+					Min:   m.Temp,
+					Max:   m.Temp,
+					Sum:   m.Temp,
+					Count: 1,
+				}
+			} else {
+				if m.Temp < data.Min {
+					data.Min = m.Temp
+				}
+				if m.Temp > data.Max {
+					data.Max = m.Temp
+				}
+				data.Sum += m.Temp
+				data.Count++
+			}
+		}
+
+		for city, data := range stats {
+			out <- CityStats{
+				City:  city,
+				Min:   data.Min,
+				Max:   data.Max,
+				Mean:  data.Sum / float64(data.Count),
+				Count: data.Count,
+			}
+		}
+	}()
+
+	return out
+}
 func main() {
 	lines := readlines("stations.csv")
 
 	measurements := parse(lines)
 
-	count := 0
-	sum := 0
+	hotReadings := filterAbove30(measurements)
 
-	for m := range measurements {
-		count++
-		if count == 10 {
-			break
-		}
-		sum += int(m.Temp)
+	results := aggregate(hotReadings)
 
-		fmt.Printf("%s %.1f\n", m.City, m.Temp)
+	for result := range results {
+		fmt.Println(result.City)
 	}
-	fmt.Println(sum)
 }
